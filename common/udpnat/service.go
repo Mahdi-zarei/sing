@@ -114,9 +114,14 @@ type conn struct {
 	localAddr  M.Socksaddr
 	remoteAddr M.Socksaddr
 	source     N.PacketWriter
+	deadline   *time.Timer
+	timeout    time.Duration
 }
 
 func (c *conn) ReadPacketThreadSafe() (buffer *buf.Buffer, addr M.Socksaddr, err error) {
+	if err = c.setDeadline(time.Now().Add(c.timeout)); err != nil {
+		return nil, M.Socksaddr{}, err
+	}
 	select {
 	case p := <-c.data:
 		return p.data, p.destination, nil
@@ -126,6 +131,9 @@ func (c *conn) ReadPacketThreadSafe() (buffer *buf.Buffer, addr M.Socksaddr, err
 }
 
 func (c *conn) ReadPacket(buffer *buf.Buffer) (addr M.Socksaddr, err error) {
+	if err = c.setDeadline(time.Now().Add(c.timeout)); err != nil {
+		return M.Socksaddr{}, err
+	}
 	select {
 	case p := <-c.data:
 		_, err = buffer.ReadOnceFrom(p.data)
@@ -137,6 +145,9 @@ func (c *conn) ReadPacket(buffer *buf.Buffer) (addr M.Socksaddr, err error) {
 }
 
 func (c *conn) WaitReadPacket(newBuffer func() *buf.Buffer) (destination M.Socksaddr, err error) {
+	if err = c.setDeadline(time.Now().Add(c.timeout)); err != nil {
+		return M.Socksaddr{}, err
+	}
 	select {
 	case p := <-c.data:
 		_, err = newBuffer().ReadOnceFrom(p.data)
@@ -152,6 +163,9 @@ func (c *conn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 }
 
 func (c *conn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+	if err = c.setDeadline(time.Now().Add(c.timeout)); err != nil {
+		return 0, M.Socksaddr{}, err
+	}
 	select {
 	case pkt := <-c.data:
 		n = copy(p, pkt.data.Bytes())
@@ -189,6 +203,22 @@ func (c *conn) RemoteAddr() net.Addr {
 
 func (c *conn) SetDeadline(t time.Time) error {
 	return os.ErrInvalid
+}
+
+func (c *conn) setDeadline(t time.Time) error {
+	if c.deadline == nil {
+		c.timeout = 300 * time.Second
+		c.deadline = time.AfterFunc(c.timeout, func() {
+			c.cancel(net.ErrClosed)
+		})
+	} else {
+		if c.deadline.Stop() {
+			c.deadline.Reset(t.Sub(time.Now()))
+		} else {
+			return net.ErrClosed
+		}
+	}
+	return nil
 }
 
 func (c *conn) SetReadDeadline(t time.Time) error {
