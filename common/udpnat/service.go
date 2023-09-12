@@ -108,40 +108,53 @@ type packet struct {
 }
 
 type conn struct {
-	ctx        context.Context
-	cancel     common.ContextCancelCauseFunc
-	data       chan packet
-	localAddr  M.Socksaddr
-	remoteAddr M.Socksaddr
-	source     N.PacketWriter
+	ctx            context.Context
+	cancel         common.ContextCancelCauseFunc
+	data           chan packet
+	localAddr      M.Socksaddr
+	remoteAddr     M.Socksaddr
+	source         N.PacketWriter
+	deadlineTimer  *time.Timer
+	doneChan       chan packet
+	timeout        time.Duration
+	isDeadlineInit bool
 }
 
 func (c *conn) ReadPacketThreadSafe() (buffer *buf.Buffer, addr M.Socksaddr, err error) {
+	c.initDeadlineChan()
 	select {
 	case p := <-c.data:
 		return p.data, p.destination, nil
+	case <-c.doneChan:
+		return nil, M.Socksaddr{}, net.ErrClosed
 	case <-c.ctx.Done():
 		return nil, M.Socksaddr{}, io.ErrClosedPipe
 	}
 }
 
 func (c *conn) ReadPacket(buffer *buf.Buffer) (addr M.Socksaddr, err error) {
+	c.initDeadlineChan()
 	select {
 	case p := <-c.data:
 		_, err = buffer.ReadOnceFrom(p.data)
 		p.data.Release()
 		return p.destination, err
+	case <-c.doneChan:
+		return M.Socksaddr{}, net.ErrClosed
 	case <-c.ctx.Done():
 		return M.Socksaddr{}, io.ErrClosedPipe
 	}
 }
 
 func (c *conn) WaitReadPacket(newBuffer func() *buf.Buffer) (destination M.Socksaddr, err error) {
+	c.initDeadlineChan()
 	select {
 	case p := <-c.data:
 		_, err = newBuffer().ReadOnceFrom(p.data)
 		p.data.Release()
 		return p.destination, err
+	case <-c.doneChan:
+		return M.Socksaddr{}, net.ErrClosed
 	case <-c.ctx.Done():
 		return M.Socksaddr{}, io.ErrClosedPipe
 	}
@@ -152,12 +165,15 @@ func (c *conn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 }
 
 func (c *conn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+	c.initDeadlineChan()
 	select {
 	case pkt := <-c.data:
 		n = copy(p, pkt.data.Bytes())
 		pkt.data.Release()
 		addr = pkt.destination.UDPAddr()
 		return n, addr, nil
+	case <-c.doneChan:
+		return 0, nil, net.ErrClosed
 	case <-c.ctx.Done():
 		return 0, nil, io.ErrClosedPipe
 	}
@@ -187,8 +203,31 @@ func (c *conn) RemoteAddr() net.Addr {
 	return c.remoteAddr
 }
 
+func (c *conn) initDeadlineChan() {
+	if !c.isDeadlineInit {
+		c.doneChan = make(chan packet)
+		c.isDeadlineInit = true
+	}
+}
+
 func (c *conn) SetDeadline(t time.Time) error {
-	return os.ErrInvalid
+	if c.deadlineTimer == nil {
+		c.timeout = time.Second * 300
+		c.initDeadlineChan()
+		c.deadlineTimer = time.AfterFunc(c.timeout, func() {
+			close(c.doneChan)
+		})
+	} else {
+		if c.deadlineTimer.Stop() {
+			c.deadlineTimer.Reset(c.timeout)
+		} else {
+			<-c.deadlineTimer.C
+			c.doneChan = make(chan packet)
+			c.deadlineTimer.Reset(c.timeout)
+		}
+	}
+
+	return nil
 }
 
 func (c *conn) SetReadDeadline(t time.Time) error {

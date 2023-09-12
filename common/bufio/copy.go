@@ -198,6 +198,7 @@ func CopyConnContextList(contextList []context.Context, source net.Conn, destina
 	var group task.Group
 	if _, dstDuplex := common.Cast[rw.WriteCloser](destination); dstDuplex {
 		group.Append("upload", func(ctx context.Context) error {
+			defer common.Close(source, destination)
 			err := common.Error(Copy(destination, source))
 			if err == nil {
 				rw.CloseWrite(destination)
@@ -208,12 +209,13 @@ func CopyConnContextList(contextList []context.Context, source net.Conn, destina
 		})
 	} else {
 		group.Append("upload", func(ctx context.Context) error {
-			defer common.Close(destination)
+			defer common.Close(source, destination)
 			return common.Error(Copy(destination, source))
 		})
 	}
 	if _, srcDuplex := common.Cast[rw.WriteCloser](source); srcDuplex {
 		group.Append("download", func(ctx context.Context) error {
+			defer common.Close(source, destination)
 			err := common.Error(Copy(source, destination))
 			if err == nil {
 				rw.CloseWrite(source)
@@ -224,7 +226,7 @@ func CopyConnContextList(contextList []context.Context, source net.Conn, destina
 		})
 	} else {
 		group.Append("download", func(ctx context.Context) error {
-			defer common.Close(source)
+			defer common.Close(source, destination)
 			return common.Error(Copy(source, destination))
 		})
 	}
