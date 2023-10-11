@@ -28,7 +28,7 @@ func NewPacketWithDeadline(ctx context.Context, conn N.PacketConn, timeout time.
 
 func (p *PacketWithDeadline) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
 	if time.Since(p.lastSet) >= time.Second*10 {
-		_ = p.PacketConn.SetDeadline(time.Now().Add(p.timeout))
+		_ = p.PacketConn.SetReadDeadline(time.Now().Add(p.timeout))
 		p.lastSet = time.Now()
 	}
 
@@ -37,7 +37,7 @@ func (p *PacketWithDeadline) ReadPacket(buffer *buf.Buffer) (destination M.Socks
 
 func (p *PacketWithDeadline) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) (err error) {
 	if time.Since(p.lastSet) >= time.Second*10 {
-		_ = p.PacketConn.SetDeadline(time.Now().Add(p.timeout))
+		_ = p.PacketConn.SetReadDeadline(time.Now().Add(p.timeout))
 		p.lastSet = time.Now()
 	}
 

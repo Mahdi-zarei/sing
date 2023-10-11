@@ -26,7 +26,7 @@ func NewConnWithDeadline(ctx context.Context, conn net.Conn, timeout time.Durati
 
 func (c *ConnWithDeadline) Read(b []byte) (n int, err error) {
 	if time.Since(c.lastSet) >= time.Second*10 {
-		_ = c.Conn.SetDeadline(time.Now().Add(c.timeout))
+		_ = c.Conn.SetReadDeadline(time.Now().Add(c.timeout))
 		c.lastSet = time.Now()
 	}
 
@@ -35,7 +35,7 @@ func (c *ConnWithDeadline) Read(b []byte) (n int, err error) {
 
 func (c *ConnWithDeadline) Write(b []byte) (n int, err error) {
 	if time.Since(c.lastSet) >= time.Second*10 {
-		_ = c.Conn.SetDeadline(time.Now().Add(c.timeout))
+		_ = c.Conn.SetReadDeadline(time.Now().Add(c.timeout))
 		c.lastSet = time.Now()
 	}
 
