@@ -2,73 +2,53 @@ package canceler
 
 import (
 	"context"
-	"time"
-
-	"github.com/sagernet/sing/common"
+	"errors"
 	"github.com/sagernet/sing/common/buf"
-	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"time"
 )
 
-type TimeoutPacketConn struct {
+type PacketWithDeadline struct {
 	N.PacketConn
 	timeout time.Duration
-	cancel  common.ContextCancelCauseFunc
-	active  time.Time
+	lastSet time.Time
+	cancel  context.CancelCauseFunc
 }
 
-func NewTimeoutPacketConn(ctx context.Context, conn N.PacketConn, timeout time.Duration) (context.Context, PacketConn) {
-	ctx, cancel := common.ContextWithCancelCause(ctx)
-	return ctx, &TimeoutPacketConn{
+func NewPacketWithDeadline(ctx context.Context, conn N.PacketConn, timeout time.Duration) (context.Context, N.PacketConn) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	return ctx, &PacketWithDeadline{
 		PacketConn: conn,
 		timeout:    timeout,
+		lastSet:    time.Time{},
 		cancel:     cancel,
 	}
 }
 
-func (c *TimeoutPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
-	for {
-		err = c.PacketConn.SetReadDeadline(time.Now().Add(c.timeout))
-		if err != nil {
-			return M.Socksaddr{}, err
-		}
-		destination, err = c.PacketConn.ReadPacket(buffer)
-		if err == nil {
-			c.active = time.Now()
-			return
-		} else if E.IsTimeout(err) {
-			if time.Since(c.active) > c.timeout {
-				c.cancel(err)
-				return
-			}
-		} else {
-			return M.Socksaddr{}, err
-		}
+func (p *PacketWithDeadline) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
+	if time.Since(p.lastSet) >= time.Second*10 {
+		_ = p.PacketConn.SetDeadline(time.Now().Add(p.timeout))
+		p.lastSet = time.Now()
 	}
+
+	return p.PacketConn.ReadPacket(buffer)
 }
 
-func (c *TimeoutPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
-	err := c.PacketConn.WritePacket(buffer, destination)
-	if err == nil {
-		c.active = time.Now()
+func (p *PacketWithDeadline) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) (err error) {
+	if time.Since(p.lastSet) >= time.Second*10 {
+		_ = p.PacketConn.SetDeadline(time.Now().Add(p.timeout))
+		p.lastSet = time.Now()
 	}
-	return err
+
+	return p.PacketConn.WritePacket(buffer, destination)
 }
 
-func (c *TimeoutPacketConn) Timeout() time.Duration {
-	return c.timeout
+func (p *PacketWithDeadline) Close() error {
+	p.cancel(errors.New("connection force closed"))
+	return p.PacketConn.Close()
 }
 
-func (c *TimeoutPacketConn) SetTimeout(timeout time.Duration) {
-	c.timeout = timeout
-	c.PacketConn.SetReadDeadline(time.Now())
-}
-
-func (c *TimeoutPacketConn) Close() error {
-	return c.PacketConn.Close()
-}
-
-func (c *TimeoutPacketConn) Upstream() any {
-	return c.PacketConn
+func (p *PacketWithDeadline) Upstream() any {
+	return p.PacketConn
 }
