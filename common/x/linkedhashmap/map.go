@@ -4,13 +4,17 @@ import (
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/x/collections"
 	"github.com/sagernet/sing/common/x/list"
+	"sync/atomic"
 )
+
+const deleteTrigger = 1 << 15
 
 var _ collections.Map[string, any] = (*Map[string, any])(nil)
 
 type Map[K comparable, V any] struct {
-	raw    list.List[collections.MapEntry[K, V]]
-	rawMap map[K]*list.Element[collections.MapEntry[K, V]]
+	raw         list.List[collections.MapEntry[K, V]]
+	rawMap      map[K]*list.Element[collections.MapEntry[K, V]]
+	deleteCount int32
 }
 
 func (m *Map[K, V]) init() {
@@ -64,7 +68,22 @@ func (m *Map[K, V]) Remove(key K) bool {
 	}
 	m.raw.Remove(entry)
 	delete(m.rawMap, key)
+
+	currDel := atomic.AddInt32(&m.deleteCount, 1)
+	if currDel >= deleteTrigger {
+		m.recreateMap()
+		atomic.StoreInt32(&m.deleteCount, 0)
+	}
+
 	return true
+}
+
+func (m *Map[K, V]) recreateMap() {
+	newMap := make(map[K]*list.Element[collections.MapEntry[K, V]])
+	for key, val := range m.rawMap {
+		newMap[key] = val
+	}
+	m.rawMap = newMap
 }
 
 func (m *Map[K, V]) PutAll(other collections.Map[K, V]) {

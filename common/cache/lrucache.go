@@ -4,11 +4,14 @@ package cache
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/x/list"
 )
+
+const deleteTrigger = 1 << 15
 
 type Option[K comparable, V any] func(*LruCache[K, V])
 
@@ -53,6 +56,7 @@ type LruCache[K comparable, V any] struct {
 	updateAgeOnGet bool
 	staleReturn    bool
 	onEvict        EvictCallback[K, V]
+	deleteCount    int32
 }
 
 func New[K comparable, V any](options ...Option[K, V]) *LruCache[K, V] {
@@ -255,6 +259,12 @@ func (c *LruCache[K, V]) Delete(key K) {
 		c.deleteElement(le)
 	}
 
+	currDel := atomic.AddInt32(&c.deleteCount, 1)
+	if currDel >= deleteTrigger {
+		c.recreateMap()
+		atomic.StoreInt32(&c.deleteCount, 0)
+	}
+
 	c.mu.Unlock()
 }
 
@@ -264,6 +274,14 @@ func (c *LruCache[K, V]) Clear() {
 	for element := c.lru.Front(); element != nil; element = element.Next() {
 		c.deleteElement(element)
 	}
+}
+
+func (c *LruCache[K, V]) recreateMap() {
+	newMap := make(map[K]*list.Element[*entry[K, V]])
+	for key, val := range c.cache {
+		newMap[key] = val
+	}
+	c.cache = newMap
 }
 
 func (c *LruCache[K, V]) maybeDeleteOldest() {
