@@ -208,7 +208,7 @@ func CopyConnContextList(contextList []context.Context, source net.Conn, destina
 		})
 	} else {
 		group.Append("upload", func(ctx context.Context) error {
-			defer common.Close(destination)
+			defer common.Close(destination, source)
 			return common.Error(Copy(destination, source))
 		})
 	}
@@ -224,7 +224,7 @@ func CopyConnContextList(contextList []context.Context, source net.Conn, destina
 		})
 	} else {
 		group.Append("download", func(ctx context.Context) error {
-			defer common.Close(source)
+			defer common.Close(source, destination)
 			return common.Error(Copy(source, destination))
 		})
 	}
