@@ -108,40 +108,62 @@ type packet struct {
 }
 
 type conn struct {
-	ctx        context.Context
-	cancel     common.ContextCancelCauseFunc
-	data       chan packet
-	localAddr  M.Socksaddr
-	remoteAddr M.Socksaddr
-	source     N.PacketWriter
+	ctx          context.Context
+	cancel       common.ContextCancelCauseFunc
+	data         chan packet
+	localAddr    M.Socksaddr
+	remoteAddr   M.Socksaddr
+	source       N.PacketWriter
+	timedOut     chan struct{}
+	timeoutTimer *time.Timer
+	timeoutInit  bool
+}
+
+func (c *conn) initDeadline() {
+	if !c.timeoutInit {
+		c.timedOut = make(chan struct{})
+		c.timeoutTimer = time.AfterFunc(100000, func() {
+			close(c.timedOut)
+		})
+		c.timeoutInit = true
+	}
 }
 
 func (c *conn) ReadPacketThreadSafe() (buffer *buf.Buffer, addr M.Socksaddr, err error) {
+	c.initDeadline()
 	select {
 	case p := <-c.data:
 		return p.data, p.destination, nil
+	case <-c.timedOut:
+		return nil, M.Socksaddr{}, os.ErrDeadlineExceeded
 	case <-c.ctx.Done():
 		return nil, M.Socksaddr{}, io.ErrClosedPipe
 	}
 }
 
 func (c *conn) ReadPacket(buffer *buf.Buffer) (addr M.Socksaddr, err error) {
+	c.initDeadline()
 	select {
 	case p := <-c.data:
 		_, err = buffer.ReadOnceFrom(p.data)
 		p.data.Release()
 		return p.destination, err
+	case <-c.timedOut:
+		return M.Socksaddr{}, os.ErrDeadlineExceeded
 	case <-c.ctx.Done():
 		return M.Socksaddr{}, io.ErrClosedPipe
 	}
 }
 
 func (c *conn) WaitReadPacket(newBuffer func() *buf.Buffer) (destination M.Socksaddr, err error) {
+	c.initDeadline()
 	select {
 	case p := <-c.data:
 		_, err = newBuffer().ReadOnceFrom(p.data)
 		p.data.Release()
 		return p.destination, err
+	case <-c.timedOut:
+		return M.Socksaddr{}, os.ErrDeadlineExceeded
 	case <-c.ctx.Done():
 		return M.Socksaddr{}, io.ErrClosedPipe
 	}
@@ -152,12 +174,15 @@ func (c *conn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 }
 
 func (c *conn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+	c.initDeadline()
 	select {
 	case pkt := <-c.data:
 		n = copy(p, pkt.data.Bytes())
 		pkt.data.Release()
 		addr = pkt.destination.UDPAddr()
 		return n, addr, nil
+	case <-c.timedOut:
+		return 0, nil, os.ErrDeadlineExceeded
 	case <-c.ctx.Done():
 		return 0, nil, io.ErrClosedPipe
 	}
@@ -188,7 +213,36 @@ func (c *conn) RemoteAddr() net.Addr {
 }
 
 func (c *conn) SetDeadline(t time.Time) error {
-	return os.ErrInvalid
+	timeout := t.Sub(time.Now())
+	if !c.timeoutTimer.Stop() {
+		select {
+		case <-c.timeoutTimer.C:
+		default:
+		}
+		select {
+		case <-c.timedOut:
+			c.timedOut = make(chan struct{})
+		default:
+		}
+		if timeout > 0 {
+			c.timeoutTimer = time.AfterFunc(timeout, func() {
+				close(c.timedOut)
+			})
+		}
+		return nil
+	}
+	select {
+	case <-c.timedOut:
+		c.timedOut = make(chan struct{})
+	default:
+	}
+	if timeout > 0 {
+		c.timeoutTimer = time.AfterFunc(timeout, func() {
+			close(c.timedOut)
+		})
+	}
+
+	return nil
 }
 
 func (c *conn) SetReadDeadline(t time.Time) error {
