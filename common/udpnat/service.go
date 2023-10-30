@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing/common"
@@ -117,6 +118,7 @@ type conn struct {
 	timedOut     chan struct{}
 	timeoutTimer *time.Timer
 	timeoutInit  bool
+	lock         sync.Mutex
 }
 
 func (c *conn) initDeadline() {
@@ -125,8 +127,10 @@ func (c *conn) initDeadline() {
 		c.timeoutTimer = time.AfterFunc(100000, func() {
 			close(c.timedOut)
 		})
+		c.timeoutTimer.Stop()
 		c.timeoutInit = true
 	}
+	return
 }
 
 func (c *conn) ReadPacketThreadSafe() (buffer *buf.Buffer, addr M.Socksaddr, err error) {
@@ -213,6 +217,7 @@ func (c *conn) RemoteAddr() net.Addr {
 }
 
 func (c *conn) SetDeadline(t time.Time) error {
+	c.initDeadline()
 	timeout := t.Sub(time.Now())
 	if !c.timeoutTimer.Stop() {
 		select {
