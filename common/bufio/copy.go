@@ -3,11 +3,6 @@ package bufio
 import (
 	"context"
 	"errors"
-	"io"
-	"net"
-	"reflect"
-	"syscall"
-
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -15,6 +10,11 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/rw"
 	"github.com/sagernet/sing/common/task"
+	"io"
+	"net"
+	"reflect"
+	"syscall"
+	"time"
 )
 
 func Copy(destination io.Writer, source io.Reader) (n int64, err error) {
@@ -42,6 +42,14 @@ func Copy(destination io.Writer, source io.Reader) (n int64, err error) {
 				continue
 			}
 		}
+
+		if sourceNetConn, ok := source.(net.Conn); ok {
+			sourceNetConn.SetDeadline(time.Time{})
+		}
+		if destinationNetConn, ok := destination.(net.Conn); ok {
+			destinationNetConn.SetDeadline(time.Time{})
+		}
+
 		srcSyscallConn, srcIsSyscall := source.(syscall.Conn)
 		dstSyscallConn, dstIsSyscall := destination.(syscall.Conn)
 		if srcIsSyscall && dstIsSyscall {
