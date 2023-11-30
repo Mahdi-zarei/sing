@@ -7,6 +7,7 @@ import (
 	"net"
 	"reflect"
 	"syscall"
+	"time"
 
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
@@ -46,6 +47,12 @@ func Copy(destination io.Writer, source io.Reader) (n int64, err error) {
 		dstSyscallConn, dstIsSyscall := destination.(syscall.Conn)
 		if srcIsSyscall && dstIsSyscall {
 			var handled bool
+			if sourceNetConn, ok := source.(net.Conn); ok {
+				sourceNetConn.SetDeadline(time.Time{})
+			}
+			if destinationNetConn, ok := destination.(net.Conn); ok {
+				destinationNetConn.SetDeadline(time.Time{})
+			}
 			handled, n, err = CopyDirect(srcSyscallConn, dstSyscallConn, readCounters, writeCounters)
 			if handled {
 				return
