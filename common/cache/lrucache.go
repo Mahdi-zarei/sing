@@ -10,6 +10,8 @@ import (
 	"github.com/sagernet/sing/common/x/list"
 )
 
+const deleteThreshold = 1 << 15
+
 type Option[K comparable, V any] func(*LruCache[K, V])
 
 type EvictCallback[K comparable, V any] func(key K, value V)
@@ -53,6 +55,7 @@ type LruCache[K comparable, V any] struct {
 	updateAgeOnGet bool
 	staleReturn    bool
 	onEvict        EvictCallback[K, V]
+	deleteCount    int32
 }
 
 func New[K comparable, V any](options ...Option[K, V]) *LruCache[K, V] {
@@ -279,8 +282,21 @@ func (c *LruCache[K, V]) deleteElement(le *list.Element[*entry[K, V]]) {
 	c.lru.Remove(le)
 	e := le.Value
 	delete(c.cache, e.key)
+	c.onDelete()
 	if c.onEvict != nil {
 		c.onEvict(e.key, e.value)
+	}
+}
+
+func (c *LruCache[K, V]) onDelete() {
+	c.deleteCount++
+	if c.deleteCount >= deleteThreshold {
+		nMap := make(map[K]*list.Element[*entry[K, V]])
+		for key, val := range c.cache {
+			nMap[key] = val
+		}
+		c.cache = nMap
+		c.deleteCount = 0
 	}
 }
 
