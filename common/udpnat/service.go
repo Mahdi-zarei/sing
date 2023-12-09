@@ -13,7 +13,6 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	"github.com/sagernet/sing/common/pipe"
 )
 
 type Handler interface {
@@ -70,10 +69,9 @@ func (s *Service[T]) NewPacket(ctx context.Context, key T, buffer *buf.Buffer, m
 func (s *Service[T]) NewContextPacket(ctx context.Context, key T, buffer *buf.Buffer, metadata M.Metadata, init func(natConn N.PacketConn) (context.Context, N.PacketWriter)) {
 	c, loaded := s.nat.LoadOrStore(key, func() *conn {
 		c := &conn{
-			data:         make(chan packet, 64),
-			localAddr:    metadata.Source,
-			remoteAddr:   metadata.Destination,
-			readDeadline: pipe.MakeDeadline(),
+			data:       make(chan packet, 64),
+			localAddr:  metadata.Source,
+			remoteAddr: metadata.Destination,
 		}
 		c.ctx, c.cancel = common.ContextWithCancelCause(ctx)
 		return c
@@ -118,20 +116,34 @@ type conn struct {
 	localAddr       M.Socksaddr
 	remoteAddr      M.Socksaddr
 	source          N.PacketWriter
-	readDeadline    pipe.Deadline
 	readWaitOptions N.ReadWaitOptions
+	watcher         *time.Timer
+	timedOut        chan struct{}
+	hasInit         bool
+}
+
+func (c *conn) initIfNeeded() {
+	if !c.hasInit {
+		c.timedOut = make(chan struct{})
+		c.watcher = time.AfterFunc(100000000, func() {
+			close(c.timedOut)
+		})
+		c.watcher.Stop()
+		c.hasInit = true
+	}
 }
 
 func (c *conn) ReadPacket(buffer *buf.Buffer) (addr M.Socksaddr, err error) {
+	c.initIfNeeded()
 	select {
 	case p := <-c.data:
 		_, err = buffer.ReadOnceFrom(p.data)
 		p.data.Release()
 		return p.destination, err
+	case <-c.timedOut:
+		return M.Socksaddr{}, os.ErrDeadlineExceeded
 	case <-c.ctx.Done():
 		return M.Socksaddr{}, io.ErrClosedPipe
-	case <-c.readDeadline.Wait():
-		return M.Socksaddr{}, os.ErrDeadlineExceeded
 	}
 }
 
@@ -140,6 +152,9 @@ func (c *conn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 }
 
 func (c *conn) Close() error {
+	if c.hasInit {
+		c.watcher.Stop()
+	}
 	select {
 	case <-c.ctx.Done():
 	default:
@@ -160,12 +175,21 @@ func (c *conn) RemoteAddr() net.Addr {
 }
 
 func (c *conn) SetDeadline(t time.Time) error {
-	return os.ErrInvalid
+	c.initIfNeeded()
+	select {
+	case <-c.timedOut:
+		c.timedOut = make(chan struct{})
+	default:
+	}
+	timeout := t.Sub(time.Now())
+	if timeout > 0 {
+		c.watcher.Reset(timeout)
+	}
+	return nil
 }
 
 func (c *conn) SetReadDeadline(t time.Time) error {
-	c.readDeadline.Set(t)
-	return nil
+	return c.SetDeadline(t)
 }
 
 func (c *conn) SetWriteDeadline(t time.Time) error {
@@ -173,7 +197,7 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 }
 
 func (c *conn) NeedAdditionalReadDeadline() bool {
-	return true
+	return false
 }
 
 func (c *conn) Upstream() any {
