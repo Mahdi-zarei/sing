@@ -2,6 +2,7 @@ package udpnat
 
 import (
 	"io"
+	"os"
 
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
@@ -16,6 +17,7 @@ func (c *conn) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
 }
 
 func (c *conn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
+	c.initIfNeeded()
 	select {
 	case p := <-c.data:
 		if c.readWaitOptions.NeedHeadroom() {
@@ -32,6 +34,8 @@ func (c *conn) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, er
 		}
 		destination = p.destination
 		return
+	case <-c.timedOut:
+		return nil, M.Socksaddr{}, os.ErrDeadlineExceeded
 	case <-c.ctx.Done():
 		return nil, M.Socksaddr{}, io.ErrClosedPipe
 	}
