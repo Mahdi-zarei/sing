@@ -6,11 +6,14 @@ import (
 	"github.com/sagernet/sing/common/x/list"
 )
 
+const deleteThreshold = 1 << 15
+
 var _ collections.Map[string, any] = (*Map[string, any])(nil)
 
 type Map[K comparable, V any] struct {
-	raw    list.List[collections.MapEntry[K, V]]
-	rawMap map[K]*list.Element[collections.MapEntry[K, V]]
+	raw         list.List[collections.MapEntry[K, V]]
+	rawMap      map[K]*list.Element[collections.MapEntry[K, V]]
+	deleteCount int32
 }
 
 func (m *Map[K, V]) init() {
@@ -106,4 +109,16 @@ func (m *Map[K, V]) Entries() []collections.MapEntry[K, V] {
 		result = append(result, item.Value)
 	}
 	return result
+}
+
+func (m *Map[K, V]) onDelete() {
+	m.deleteCount++
+	if m.deleteCount >= deleteThreshold {
+		nMap := make(map[K]*list.Element[collections.MapEntry[K, V]])
+		for key, val := range m.rawMap {
+			nMap[key] = val
+		}
+		m.rawMap = nMap
+		m.deleteCount = 0
+	}
 }
