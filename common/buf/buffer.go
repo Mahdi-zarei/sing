@@ -13,13 +13,12 @@ import (
 )
 
 type Buffer struct {
-	data        []byte
-	start       int
-	end         int
-	capacity    int
-	refs        atomic.Int32
-	managed     bool
-	dataManaged bool
+	data     []byte
+	start    int
+	end      int
+	capacity int
+	refs     atomic.Int32
+	managed  bool
 }
 
 func New() *Buffer {
@@ -33,21 +32,17 @@ func NewPacket() *Buffer {
 func NewSize(size int) *Buffer {
 	buffer := getBuffer()
 	if size == 0 {
-		*buffer = Buffer{
-			managed: true,
-		}
+		*buffer = Buffer{}
 	} else if size > 65535 {
 		*buffer = Buffer{
 			data:     make([]byte, size),
 			capacity: size,
-			managed:  true,
 		}
 	} else {
 		*buffer = Buffer{
-			data:        Get(size),
-			capacity:    size,
-			managed:     true,
-			dataManaged: true,
+			data:     Get(size),
+			capacity: size,
+			managed:  true,
 		}
 	}
 	return buffer
@@ -59,7 +54,6 @@ func As(data []byte) *Buffer {
 		data:     data,
 		end:      len(data),
 		capacity: len(data),
-		managed:  true,
 	}
 	return buffer
 }
@@ -69,7 +63,6 @@ func With(data []byte) *Buffer {
 	*buffer = Buffer{
 		data:     data,
 		capacity: len(data),
-		managed:  true,
 	}
 	return buffer
 }
@@ -299,28 +292,22 @@ func (b *Buffer) DecRef() {
 }
 
 func (b *Buffer) Release() {
-	if b == nil {
-		return
-	}
-	managed, dataManaged := b.managed, b.dataManaged
-	if !(managed || dataManaged) {
+	if b == nil || b.data == nil {
 		return
 	}
 	if b.refs.Load() > 0 {
 		return
 	}
-	if dataManaged {
+	if b.managed {
 		common.Must(Put(b.data))
 	}
 	*b = Buffer{}
-	if managed {
-		putBuffer(b)
-	}
+	putBuffer(b)
 }
 
 func (b *Buffer) Leak() {
 	if debug.Enabled {
-		if b == nil || !(b.managed || b.dataManaged) {
+		if b == nil || b.data == nil {
 			return
 		}
 		refs := b.refs.Load()
