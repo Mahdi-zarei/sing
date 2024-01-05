@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"syscall"
 	"time"
 
@@ -14,7 +15,6 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/rw"
-	"github.com/sagernet/sing/common/task"
 )
 
 func Copy(destination io.Writer, source io.Reader) (n int64, err error) {
@@ -171,43 +171,62 @@ func CopyConn(ctx context.Context, source net.Conn, destination net.Conn) error 
 }
 
 func CopyConnContextList(contextList []context.Context, source net.Conn, destination net.Conn) error {
-	var group task.Group
+	var err1, err2 error
+	wg := sync.WaitGroup{}
+	wg.Add(2)
 	if _, dstDuplex := common.Cast[rw.WriteCloser](destination); dstDuplex {
-		group.Append("upload", func(ctx context.Context) error {
-			err := common.Error(Copy(destination, source))
-			if err == nil {
+		go func() {
+			defer wg.Done()
+			err1 = common.Error(Copy(destination, source))
+			if err1 == nil {
 				rw.CloseWrite(destination)
 			} else {
 				common.Close(destination)
+				err1 = E.Cause(err1, "upload")
 			}
-			return err
-		})
+		}()
 	} else {
-		group.Append("upload", func(ctx context.Context) error {
+		go func() {
+			defer wg.Done()
 			defer common.Close(destination)
-			return common.Error(Copy(destination, source))
-		})
+			err1 = common.Error(Copy(destination, source))
+			if err1 != nil {
+				err1 = E.Cause(err1, "upload")
+			}
+		}()
 	}
 	if _, srcDuplex := common.Cast[rw.WriteCloser](source); srcDuplex {
-		group.Append("download", func(ctx context.Context) error {
-			err := common.Error(Copy(source, destination))
-			if err == nil {
+		go func() {
+			defer wg.Done()
+			err2 = common.Error(Copy(source, destination))
+			if err2 == nil {
 				rw.CloseWrite(source)
 			} else {
 				common.Close(source)
+				err2 = E.Cause(err2, "download")
 			}
-			return err
-		})
+		}()
 	} else {
-		group.Append("download", func(ctx context.Context) error {
+		go func() {
+			defer wg.Done()
 			defer common.Close(source)
-			return common.Error(Copy(source, destination))
-		})
+			err2 = common.Error(Copy(source, destination))
+			if err2 != nil {
+				err2 = E.Cause(err2, "download")
+			}
+		}()
 	}
-	group.Cleanup(func() {
-		common.Close(source, destination)
-	})
-	return group.RunContextList(contextList)
+	wg.Wait()
+	common.Close(source, destination)
+
+	var retErr error
+	if err1 != nil {
+		retErr = E.Errors(err1)
+	}
+	if err2 != nil {
+		retErr = E.Errors(err2)
+	}
+	return retErr
 }
 
 func CopyPacket(destinationConn N.PacketWriter, source N.PacketReader) (n int64, err error) {
@@ -332,16 +351,36 @@ func CopyPacketConn(ctx context.Context, source N.PacketConn, destination N.Pack
 }
 
 func CopyPacketConnContextList(contextList []context.Context, source N.PacketConn, destination N.PacketConn) error {
-	var group task.Group
-	group.Append("upload", func(ctx context.Context) error {
-		return common.Error(CopyPacket(destination, source))
-	})
-	group.Append("download", func(ctx context.Context) error {
-		return common.Error(CopyPacket(source, destination))
-	})
-	group.Cleanup(func() {
-		common.Close(source, destination)
-	})
-	group.FastFail()
-	return group.RunContextList(contextList)
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	var err1, err2 error
+
+	go func() {
+		defer wg.Done()
+		defer source.Close()
+		defer destination.Close()
+		err1 = common.Error(CopyPacket(destination, source))
+		if err1 != nil {
+			err1 = E.Cause(err1, "upload")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		defer source.Close()
+		defer destination.Close()
+		err2 = common.Error(CopyPacket(source, destination))
+		if err2 != nil {
+			err2 = E.Cause(err2, "download")
+		}
+	}()
+	wg.Wait()
+
+	var retErr error
+	if err1 != nil {
+		retErr = E.Errors(err1)
+	}
+	if err2 != nil {
+		retErr = E.Errors(err2)
+	}
+	return retErr
 }
