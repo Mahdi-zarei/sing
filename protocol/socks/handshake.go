@@ -200,6 +200,13 @@ func HandleConnection0(ctx context.Context, conn net.Conn, version byte, authent
 			}
 			metadata.Protocol = "socks5"
 			metadata.Destination = request.Destination
+
+			var OriginSrc []byte
+			OriginSrc, err = rw.ReadBytes(conn, 4)
+			if err != nil {
+				return err
+			}
+			metadata.OriginalSource = M.Socksaddr{Addr: M.AddrFromIP(OriginSrc)}
 			return handler.NewConnection(ctx, conn, metadata)
 		case socks5.CommandUDPAssociate:
 			var udpConn *net.UDPConn
@@ -217,6 +224,13 @@ func HandleConnection0(ctx context.Context, conn net.Conn, version byte, authent
 			}
 			metadata.Protocol = "socks5"
 			metadata.Destination = request.Destination
+
+			var OriginSrc []byte
+			OriginSrc, err = rw.ReadBytes(conn, 4)
+			if err != nil {
+				return err
+			}
+			metadata.OriginalSource = M.Socksaddr{Addr: M.AddrFromIP(OriginSrc)}
 			var innerError error
 			done := make(chan struct{})
 			associatePacketConn := NewAssociatePacketConn(udpConn, request.Destination, conn)
