@@ -2,11 +2,11 @@ package list
 
 import "github.com/sagernet/sing/common"
 
-func (l List[T]) Size() int {
+func (l *List[T]) Size() int {
 	return l.len
 }
 
-func (l List[T]) IsEmpty() bool {
+func (l *List[T]) IsEmpty() bool {
 	return l.len == 0
 }
 
