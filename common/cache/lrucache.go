@@ -67,7 +67,30 @@ func New[K comparable, V any](options ...Option[K, V]) *LruCache[K, V] {
 		option(lc)
 	}
 
+	go lc.expiryWorker()
+
 	return lc
+}
+
+func (c *LruCache[K, V]) expiryWorker() {
+	deleteInterval := 5 * time.Minute
+	ticker := time.NewTicker(deleteInterval)
+	for {
+		select {
+		case <-ticker.C:
+			c.mu.Lock()
+			c.deleteExpired()
+			c.mu.Unlock()
+		}
+	}
+}
+
+func (c *LruCache[K, V]) deleteExpired() {
+	for k, v := range c.cache {
+		if v.Value.expires != 0 && v.Value.expires <= time.Now().Unix() {
+			c.Delete(k)
+		}
+	}
 }
 
 func (c *LruCache[K, V]) Load(key K) (V, bool) {
@@ -235,7 +258,7 @@ func (c *LruCache[K, V]) get(key K) *entry[K, V] {
 		return nil
 	}
 
-	if !c.staleReturn && c.maxAge > 0 && le.Value.expires <= time.Now().Unix() {
+	if !c.staleReturn && le.Value.expires != 0 && le.Value.expires <= time.Now().Unix() {
 		c.deleteElement(le)
 		c.maybeDeleteOldest()
 
