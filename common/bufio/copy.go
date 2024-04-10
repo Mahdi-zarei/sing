@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"syscall"
+	"time"
 
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
@@ -158,6 +159,8 @@ func CopyExtendedWithPool(originSource io.Reader, destination N.ExtendedWriter, 
 }
 
 func CopyConn(ctx context.Context, source net.Conn, destination net.Conn) error {
+	source.SetDeadline(time.Time{})
+	destination.SetDeadline(time.Time{})
 	return CopyConnContextList([]context.Context{ctx}, source, destination)
 }
 
@@ -319,6 +322,8 @@ func WritePacketWithPool(originSource N.PacketReader, destinationConn N.PacketWr
 }
 
 func CopyPacketConn(ctx context.Context, source N.PacketConn, destination N.PacketConn) error {
+	source.SetDeadline(time.Time{})
+	destination.SetDeadline(time.Time{})
 	return CopyPacketConnContextList([]context.Context{ctx}, source, destination)
 }
 
