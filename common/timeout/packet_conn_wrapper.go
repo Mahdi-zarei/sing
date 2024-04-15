@@ -22,7 +22,7 @@ func NewPacketConnWithTimeout(conn N.PacketConn, timeout time.Duration) N.Packet
 }
 
 func (c *PacketConnWithTimeout) ReadPacket(buffer *buf.Buffer) (destination metadata.Socksaddr, err error) {
-	if time.Since(c.lastSet) >= 10*time.Second && time.Now().After(c.manualDeadline) {
+	if time.Since(c.lastSet) >= c.timeout/4 && time.Now().After(c.manualDeadline) {
 		_ = c.PacketConn.SetDeadline(time.Now().Add(c.timeout))
 		c.lastSet = time.Now()
 	}
@@ -31,7 +31,7 @@ func (c *PacketConnWithTimeout) ReadPacket(buffer *buf.Buffer) (destination meta
 }
 
 func (c *PacketConnWithTimeout) WritePacket(buffer *buf.Buffer, destination metadata.Socksaddr) error {
-	if time.Since(c.lastSet) >= 10*time.Second && time.Now().After(c.manualDeadline) {
+	if time.Since(c.lastSet) >= c.timeout/4 && time.Now().After(c.manualDeadline) {
 		_ = c.PacketConn.SetDeadline(time.Now().Add(c.timeout))
 		c.lastSet = time.Now()
 	}

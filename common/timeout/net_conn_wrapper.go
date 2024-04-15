@@ -20,7 +20,7 @@ func NewNetConnWithTimeout(conn net.Conn, timeout time.Duration) net.Conn {
 }
 
 func (c *NetConnWithTimeout) Read(b []byte) (n int, err error) {
-	if time.Since(c.lastSet) >= 10*time.Second && time.Now().After(c.manualDeadline) {
+	if time.Since(c.lastSet) >= c.timeout/4 && time.Now().After(c.manualDeadline) {
 		_ = c.Conn.SetDeadline(time.Now().Add(c.timeout))
 		c.lastSet = time.Now()
 	}
@@ -29,7 +29,7 @@ func (c *NetConnWithTimeout) Read(b []byte) (n int, err error) {
 }
 
 func (c *NetConnWithTimeout) Write(b []byte) (n int, err error) {
-	if time.Since(c.lastSet) >= 10*time.Second && time.Now().After(c.manualDeadline) {
+	if time.Since(c.lastSet) >= c.timeout/4 && time.Now().After(c.manualDeadline) {
 		_ = c.Conn.SetDeadline(time.Now().Add(c.timeout))
 		c.lastSet = time.Now()
 	}
