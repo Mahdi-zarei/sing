@@ -46,16 +46,23 @@ func WithStale[K comparable, V any](stale bool) Option[K, V] {
 	}
 }
 
+func WithDisabledCleaner[K comparable, V any]() Option[K, V] {
+	return func(l *LruCache[K, V]) {
+		l.disableExpiryWorker = true
+	}
+}
+
 type LruCache[K comparable, V any] struct {
-	maxAge         int64
-	maxSize        int
-	mu             sync.Mutex
-	cache          map[K]*list.Element[*entry[K, V]]
-	lru            list.List[*entry[K, V]] // Front is least-recent
-	updateAgeOnGet bool
-	staleReturn    bool
-	onEvict        EvictCallback[K, V]
-	deleteCount    int32
+	maxAge              int64
+	maxSize             int
+	mu                  sync.Mutex
+	cache               map[K]*list.Element[*entry[K, V]]
+	lru                 list.List[*entry[K, V]] // Front is least-recent
+	updateAgeOnGet      bool
+	staleReturn         bool
+	onEvict             EvictCallback[K, V]
+	disableExpiryWorker bool
+	deleteCount         int32
 }
 
 func New[K comparable, V any](options ...Option[K, V]) *LruCache[K, V] {
@@ -73,6 +80,9 @@ func New[K comparable, V any](options ...Option[K, V]) *LruCache[K, V] {
 }
 
 func (c *LruCache[K, V]) expiryWorker() {
+	if c.disableExpiryWorker {
+		return
+	}
 	deleteInterval := 5 * time.Minute
 	ticker := time.NewTicker(deleteInterval)
 	for {
