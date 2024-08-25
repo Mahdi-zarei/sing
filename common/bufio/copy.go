@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"syscall"
+	"time"
 
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
@@ -210,6 +211,8 @@ func CopyExtendedChanWithPool(destination N.ExtendedWriter, source N.ExtendedRea
 }
 
 func CopyConn(ctx context.Context, source net.Conn, destination net.Conn) error {
+	source.SetDeadline(time.Time{})
+	destination.SetDeadline(time.Time{})
 	var group task.Group
 	if _, dstDuplex := common.Cast[N.WriteCloser](destination); dstDuplex {
 		group.Append("upload", func(ctx context.Context) error {
@@ -356,6 +359,8 @@ func WritePacketWithPool(originSource N.PacketReader, destination N.PacketWriter
 }
 
 func CopyPacketConn(ctx context.Context, source N.PacketConn, destination N.PacketConn) error {
+	source.SetDeadline(time.Time{})
+	destination.SetDeadline(time.Time{})
 	var group task.Group
 	group.Append("upload", func(ctx context.Context) error {
 		return common.Error(CopyPacket(destination, source))
