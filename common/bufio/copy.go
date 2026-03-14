@@ -3,15 +3,16 @@ package bufio
 import (
 	"context"
 	"errors"
-	"io"
-	"net"
-
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/task"
+	"github.com/sagernet/sing/common/timeout"
+	"io"
+	"net"
+	"time"
 )
 
 const (
@@ -25,6 +26,12 @@ func Copy(destination io.Writer, source io.Reader) (n int64, err error) {
 }
 
 func CopyWithIncreateBuffer(destination io.Writer, source io.Reader, increaseBufferAfter int64, batchSize int) (n int64, err error) {
+	if sourceWithDeadline, ok := source.(*timeout.NetConnWithTimeout); ok {
+		sourceWithDeadline.SetDeadline(time.Time{})
+	}
+	if destinationWithDeadline, ok := destination.(*timeout.NetConnWithTimeout); ok {
+		destinationWithDeadline.SetDeadline(time.Time{})
+	}
 	if source == nil {
 		return 0, E.New("nil reader")
 	} else if destination == nil {
@@ -259,6 +266,12 @@ func CopyConn(ctx context.Context, source net.Conn, destination net.Conn) error 
 }
 
 func CopyPacket(destinationConn N.PacketWriter, source N.PacketReader) (n int64, err error) {
+	if sourceWithDeadline, ok := source.(*timeout.PacketConnWithTimeout); ok {
+		sourceWithDeadline.SetDeadline(time.Time{})
+	}
+	if destinationConnWithDeadline, ok := destinationConn.(*timeout.PacketConnWithTimeout); ok {
+		destinationConnWithDeadline.SetDeadline(time.Time{})
+	}
 	var readCounters, writeCounters []N.CountFunc
 	originSource := source
 	for {
